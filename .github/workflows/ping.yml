@@ -8,5 +8,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - run: nproc; free -g | head -2; if [ -n "$CS_KEY" ]; then echo "secret: present"; else echo "secret: missing"; fi
-        env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+      - env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+        run: |
+          nproc; free -g | head -2
+          if [ -n "$CS_KEY" ]; then echo "secret present"; else echo "secret missing"; fi
