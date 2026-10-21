@@ -215,7 +215,7 @@ def mix(wd, total, events, lufs=-14.0):
     for i, a in enumerate(act):
         vv += (a - vv) * ((1 - np.exp(-0.02 / 0.06)) if a > vv else (1 - np.exp(-0.02 / 0.45))); env[i] = vv
     env = np.pad(np.repeat(env, w), (0, n))[:n]
-    vr = np.sqrt(np.mean(voice[np.repeat(act, w)[:n].astype(bool)] ** 2)) if act.any() else 0.05
+    vr = np.sqrt(np.mean(voice[np.pad(np.repeat(act, w), (0, n))[:n].astype(bool)] ** 2)) if act.any() else 0.05
     m, msr = sf.read(os.path.join(wd, "music.wav"))
     if m.ndim > 1: m = m.mean(1)
     if msr != SR: m = ffilter_sr(m, msr)

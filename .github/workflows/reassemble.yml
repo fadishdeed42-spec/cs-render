@@ -1,0 +1,66 @@
+name: reassemble
+# Re-run only the assemble step for an earlier render run, using the current engine code.
+# Trigger: push jobs/assemble/<name>.txt with lines: "<run id>" then "<job file>:<first job index>:<chunk count>" per video.
+on:
+  push:
+    paths: ['jobs/assemble/*.txt']
+permissions: {contents: write, actions: read}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs: {items: '${{ steps.m.outputs.items }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - id: m
+        run: |
+          F=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'jobs/assemble/*.txt')
+          python3 - "$F" >> $GITHUB_OUTPUT <<'PY'
+          import json, sys
+          items = []
+          for f in sys.argv[1].split():
+              lines = [l.strip() for l in open(f) if l.strip()]
+              run = lines[0]
+              for l in lines[1:]:
+                  job, first, n = l.split(":")
+                  items.append({"run": run, "file": job, "first": int(first), "n": int(n)})
+          print("items=" + json.dumps(items))
+          PY
+  assemble:
+    needs: plan
+    if: needs.plan.outputs.items != '[]'
+    strategy: {fail-fast: false, matrix: {include: '${{ fromJson(needs.plan.outputs.items) }}'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: setup
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+          pip install -q pillow numpy soundfile faster-whisper
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'chunk-*', path: chunks, run-id: '${{ matrix.run }}', github-token: '${{ secrets.GITHUB_TOKEN }}'}
+      - name: assemble (silent)
+        env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+        run: |
+          N=$(basename ${{ matrix.file }} .enc)
+          tools/open_input.sh ${{ matrix.file }} w
+          mkdir -p w/frames w/logs
+          for k in $(seq ${{ matrix.first }} $(( ${{ matrix.first }} + ${{ matrix.n }} - 1 ))); do
+            c=$(ls -d chunks/chunk-$k chunks/chunk-$k-* 2>/dev/null | head -1)/chunk.enc
+            [ -f "$c" ] || { echo "missing chunk $k"; continue; }
+            d=$(mktemp -d); openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CS_KEY -in $c | tar -xzf - -C $d
+            cp $d/frames/* w/frames/ 2>/dev/null || true; cp $d/render.log w/logs/chunk-$k.log; rm -rf $d
+          done
+          ls w/frames | wc -l
+          python engine3d/assemble.py w > w/assemble.log 2>&1 && tail -1 w/assemble.log | cut -c1-80 || echo "assemble failed"
+          mkdir -p out/render
+          (cd w && ../tools/seal.sh ../out/render/$N.tar.enc result assemble.log logs)
+          ls -la out/render/$N.tar.enc
+      - name: commit sealed output
+        run: |
+          git config user.name cs-bot; git config user.email noreply@anthropic.com
+          git add out/render/*.tar.enc
+          git commit -qm "render output (sealed) [skip ci]" && for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && break; sleep $((RANDOM % 9 + 4)); done || true
