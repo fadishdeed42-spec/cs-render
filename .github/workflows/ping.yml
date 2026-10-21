@@ -1,0 +1,12 @@
+name: ping
+# Checks that runners start and that the CS_KEY secret is present (never prints it).
+on:
+  push:
+    paths: ['.github/workflows/ping.yml', 'jobs/ping']
+permissions: {contents: read}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: nproc; free -g | head -2; if [ -n "$CS_KEY" ]; then echo "secret: present"; else echo "secret: missing"; fi
+        env: {CS_KEY: '${{ secrets.CS_KEY }}'}

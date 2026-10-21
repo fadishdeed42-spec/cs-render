@@ -1,0 +1,47 @@
+name: voice
+# Push jobs/voice/NAME.enc (encrypted voice json) -> house voice (Chatterbox + am_liam reference, ASR-checked takes)
+# -> out/voice/NAME.tar.enc (encrypted with the owner's public key). Logs stay silent: nothing readable is printed.
+on:
+  push:
+    paths: ['jobs/voice/*.enc']
+permissions: {contents: write}
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs: {files: '${{ steps.f.outputs.files }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - id: f
+        run: echo "files=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'jobs/voice/*.enc' | jq -R . | jq -sc .)" >> $GITHUB_OUTPUT
+  voice:
+    needs: list
+    if: needs.list.outputs.files != '[]'
+    strategy: {fail-fast: false, matrix: {file: '${{ fromJson(needs.list.outputs.files) }}'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: setup
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng >/dev/null
+          pip install -q torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q chatterbox-tts soundfile "kokoro>=0.9" "misaki[en]" librosa faster-whisper && pip cache purge >/dev/null
+      - name: voice (silent)
+        env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+        run: |
+          N=$(basename ${{ matrix.file }} .enc)
+          tools/open_input.sh ${{ matrix.file }} w
+          cp engine/*.py w/ 2>/dev/null || true
+          (cd w && python cvoice.py voice/$N.json > run.log 2>&1) && echo ok || echo "voice step failed (details sealed)"
+          mkdir -p out/voice
+          (cd w && ../tools/seal.sh ../out/voice/$N.tar.enc voice run.log)
+          rm -rf w
+      - name: commit sealed output
+        run: |
+          git config user.name cs-bot; git config user.email noreply@anthropic.com
+          git add out/voice/*.tar.enc
+          git commit -qm "voice output (sealed) [skip ci]" && for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && break; sleep $((RANDOM % 9 + 4)); done || true
