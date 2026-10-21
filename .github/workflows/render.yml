@@ -1,0 +1,87 @@
+name: render
+# Push jobs/render/NAME.enc (encrypted bundle: scene.py, timeline.json, comp.json, voice.wav, music.wav)
+# -> 20 parallel Blender (Cycles) chunk renders -> assemble (captions, voice-first mix, QC) -> out/render/NAME.tar.enc
+# Intermediate artifacts are encrypted with CS_KEY; the result is sealed with the owner's public key. Logs print numbers only.
+on:
+  push:
+    paths: ['jobs/render/*.enc']
+permissions: {contents: write}
+env: {NCHUNK: '20'}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs: {matrix: '${{ steps.m.outputs.matrix }}', files: '${{ steps.m.outputs.files }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - id: m
+        run: |
+          F=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'jobs/render/*.enc')
+          python3 -c "
+          import json,os,sys
+          f=[x for x in '''$F'''.split() if x]
+          n=int(os.environ['NCHUNK'])
+          print('matrix='+json.dumps([{'file':x,'i':i} for x in f for i in range(n)]))
+          print('files='+json.dumps(f))" >> $GITHUB_OUTPUT
+  render:
+    needs: plan
+    if: needs.plan.outputs.files != '[]'
+    strategy: {fail-fast: false, max-parallel: 20, matrix: {include: '${{ fromJson(needs.plan.outputs.matrix) }}'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: setup blender
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libxrender1 libxi6 libxkbcommon0 libsm6 libgl1 libegl1 libxfixes3 libxxf86vm1 >/dev/null
+          pip install -q bpy==5.0.1 numpy
+      - name: render chunk (silent)
+        env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+        run: |
+          N=$(basename ${{ matrix.file }} .enc); I=${{ matrix.i }}
+          tools/open_input.sh ${{ matrix.file }} w
+          cp engine3d/cs3d.py w/
+          cd w
+          TOT=$(CS_TIMELINE=timeline.json python -c "import json,math;t=json.load(open('timeline.json'));print(int(round(t['total']*24))+1)")
+          C=$(( (TOT + NCHUNK - 1) / NCHUNK )); A=$(( I * C + 1 )); B=$(( A + C - 1 )); [ $B -gt $TOT ] && B=$TOT
+          echo "frames $A-$B of $TOT"
+          mkdir -p frames
+          if [ $A -le $TOT ]; then CS_TIMELINE=timeline.json python scene.py range $A $B $PWD/frames/ > render.log 2>&1 || echo "render failed"; fi
+          ls frames | wc -l
+          tar -czf - frames render.log | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CS_KEY -out ../chunk.enc
+      - uses: actions/upload-artifact@v4
+        with: {name: 'chunk-${{ strategy.job-index }}', path: chunk.enc, retention-days: 1}
+  assemble:
+    needs: [plan, render]
+    if: always() && needs.plan.outputs.files != '[]'
+    strategy: {fail-fast: false, matrix: {file: '${{ fromJson(needs.plan.outputs.files) }}'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: setup
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+          pip install -q pillow numpy soundfile faster-whisper
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'chunk-*', path: chunks}
+      - name: assemble (silent)
+        env: {CS_KEY: '${{ secrets.CS_KEY }}'}
+        run: |
+          N=$(basename ${{ matrix.file }} .enc)
+          tools/open_input.sh ${{ matrix.file }} w
+          for c in chunks/*/chunk.enc; do d=$(mktemp -d); openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CS_KEY -in $c | tar -xzf - -C $d; mkdir -p w/frames w/logs; cp $d/frames/* w/frames/ 2>/dev/null || true; cp $d/render.log w/logs/$(basename $(dirname $c)).log; rm -rf $d; done
+          ls w/frames | wc -l
+          python engine3d/assemble.py w > w/assemble.log 2>&1 && tail -1 w/assemble.log | cut -c1-80 || echo "assemble failed"
+          mkdir -p out/render
+          (cd w && ../tools/seal.sh ../out/render/$N.tar.enc result assemble.log logs)
+          ls -la out/render/$N.tar.enc
+      - name: commit sealed output
+        run: |
+          git config user.name cs-bot; git config user.email noreply@anthropic.com
+          git add out/render/*.tar.enc
+          git commit -qm "render output (sealed) [skip ci]" && for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && break; sleep $((RANDOM % 9 + 4)); done || true
