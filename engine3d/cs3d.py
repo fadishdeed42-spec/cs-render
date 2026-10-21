@@ -41,6 +41,9 @@ def setup(style="arctic", timeline=None):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     tl = json.load(open(timeline or os.environ.get("CS_TIMELINE", "timeline.json")))
     B.update(tl["beats"]); TOTAL = tl["total"]
+    # stories do `from cs3d import *` before setup(): hand them the real length too
+    import inspect
+    inspect.currentframe().f_back.f_globals["TOTAL"] = TOTAL
     sc = bpy.context.scene
     sc.render.fps = FPS; sc.frame_start = 1; sc.frame_end = F(TOTAL)
     _style = STYLES[style]
@@ -398,3 +401,7 @@ def run():
         print("FRAMES", F(TOTAL))
     elif a[0] == "save":
         bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath("scene.blend"))
+
+def set_interp(idblock, interp):
+    """public: set keyframe interpolation on an object, material node tree or other ID ("CONSTANT", "LINEAR", "BEZIER")"""
+    _set_interp_data(idblock, interp)
