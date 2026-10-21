@@ -77,8 +77,8 @@ def draw_caption(d, chunks, t, y=1330):
     words = [w[0].rstrip(".,:") if j == len(c) - 1 else w[0] for j, w in enumerate(c)]
     sp = d.textlength(" ", font=f); ws = [d.textlength(w, font=f) for w in words]
     tot = sum(ws) + sp * (len(words) - 1)
-    if tot > W * 0.9:
-        f = font(CAP, 74 * pop * W * 0.9 / tot); sp = d.textlength(" ", font=f); ws = [d.textlength(w, font=f) for w in words]
+    if tot > W * 0.8:
+        f = font(CAP, 74 * pop * W * 0.8 / tot); sp = d.textlength(" ", font=f); ws = [d.textlength(w, font=f) for w in words]
         tot = sum(ws) + sp * (len(words) - 1)
     x = W / 2 - tot / 2
     for j, w in enumerate(words):
@@ -102,7 +102,9 @@ def end_card(d, k, lines):
     for i, s in enumerate(lines):
         size = 92 if i == 0 else 54
         col = (255, 255, 255) if i == 0 else (255, 210, 60)
-        d.text((W / 2, y * SS), s, font=font(CAP, size), fill=col + (int(255 * k),), anchor="mm", stroke_width=6 * SS, stroke_fill=(0, 0, 0, int(255 * k)))
+        f = font(CAP, size); tw = d.textlength(s, font=f)
+        if tw > W * 0.84: f = font(CAP, size * W * 0.84 / tw)
+        d.text((W / 2, y * SS), s, font=f, fill=col + (int(255 * k),), anchor="mm", stroke_width=6 * SS, stroke_fill=(0, 0, 0, int(255 * k)))
         y += size * 1.35
 
 CTX = {}
@@ -244,7 +246,14 @@ def mix(wd, total, events, lufs=-14.0):
     gg = np.pad(np.repeat(sm, w5), (0, n))[:n]; bed *= gg
     out = voice + bed
     out /= max(1.0, np.max(np.abs(out)) / 0.9)
-    raw = os.path.join(wd, "mix_raw.wav"); sf.write(raw, out.astype(np.float32), SR, subtype="FLOAT")
+    raw0 = os.path.join(wd, "mix_raw0.wav"); sf.write(raw0, out.astype(np.float32), SR, subtype="FLOAT")
+    # pre-gain to the target, then a soft limiter so loudnorm can reach it without hitting the peak ceiling
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", raw0, "-af", "ebur128", "-f", "null", "-"], capture_output=True, text=True).stderr
+    i0 = float(r[r.rindex("Summary:"):].split("I:")[1].split()[0])
+    raw = os.path.join(wd, "mix_raw.wav")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", raw0, "-af",
+                    f"volume={lufs - i0 + 0.3:.2f}dB,alimiter=limit=0.70:attack=3:release=60:level=disabled",
+                    "-ar", str(SR), "-c:a", "pcm_f32le", raw], check=True)
     # two-pass loudness
     r = subprocess.run(["ffmpeg", "-hide_banner", "-i", raw, "-af", f"loudnorm=I={lufs}:TP=-1.5:LRA=9:print_format=json", "-f", "null", "-"], capture_output=True, text=True).stderr
     j = json.loads(r[r.rindex("{"):r.rindex("}") + 1])
