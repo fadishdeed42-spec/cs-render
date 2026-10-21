@@ -183,7 +183,7 @@ def sfx(kind, dur=0.5):
         while t < dur - 0.05:
             i = int(t * SR); c = noise(0.05, 2) * env_exp(int(0.05 * SR), 0.01) * rng.uniform(0.5, 1)
             out[i:i + len(c)] += c[:n - i]; t += rng.uniform(0.02, 0.06)
-        return out + sfx("thud")[:n] if n >= int(0.45 * SR) else out
+        th = sfx("thud")[:n]; out[:len(th)] += th; return out
     if kind == "alarm":
         f = 700 + 250 * np.sign(np.sin(2 * np.pi * 2 * x)); return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.minimum(1, (dur - x) * 4)
     if kind == "siren":
