@@ -25,7 +25,7 @@ def tts(voice, text, settings, prev=None, nxt=None, model="eleven_multilingual_v
     body = {"text": text, "model_id": model, "voice_settings": settings}
     if prev: body["previous_text"] = prev
     if nxt: body["next_text"] = nxt
-    r = req(f"/text-to-speech/{vid(voice)}/with-timestamps?output_format=mp3_44100_192", body)
+    r = req(f"/text-to-speech/{vid(voice)}/with-timestamps?output_format=mp3_44100_128", body)
     return base64.b64decode(r["audio_base64"]), r.get("alignment") or {}
 def to_wav(mp3, wav, extra_af=None):
     open(wav + ".mp3", "wb").write(mp3)
