@@ -44,6 +44,16 @@ if mode == "audition":
         if v.lower() not in VOICES: continue
         a, _ = tts(v, q, SET_H); to_wav(a, os.path.join(out, f"H_{v}.wav"), H_FX)
     sys.exit(0)
+if mode == "line":   # re-speak single lines: env KEYS="date q3" -> out/line_<key>.wav + line_<key>.json (alignment)
+    for i, (who, key, text) in enumerate(S["lines"]):
+        if key not in os.environ.get("KEYS", "").split(): continue
+        lines = S["lines"]
+        prev = " ".join(l[2] for l in lines[max(0, i - 2):i] if l[0] == who) or None
+        nxt = next((l[2] for l in lines[i + 1:] if l[0] == who), None)
+        a, al = tts(S["voices"][who], text, SET_H if who == "H" else SET_N, prev, nxt)
+        to_wav(a, os.path.join(out, f"line_{key}.wav"), H_FX if who == "H" else None)
+        json.dump(al, open(os.path.join(out, f"line_{key}.json"), "w"))
+    sys.exit(0)
 # full
 import soundfile as sf, numpy as np
 segs, words, t = [], [], 0.0
