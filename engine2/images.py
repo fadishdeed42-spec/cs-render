@@ -26,11 +26,13 @@ def path(r):
     if isinstance(r, dict): r = r.get("path") or r.get("url")
     return r
 log = []
-for k, sh in enumerate(S["shots"]):
-    if k % nparts != part: continue
+only = set(os.environ.get("ONLY", "").split()) - {""}
+jobs = [(k, sh, v) for k, sh in enumerate(S["shots"]) if not only or sh["id"] in only for v in range(nv)]
+for j, (k, sh, v) in enumerate(jobs):
+    if j % nparts != part: continue
     p = (S["style"] + ", " + sh["img"].replace("HERO", S["hero"]))
     order = [qwen, krea] if sh.get("text") else [krea, qwen]
-    for v in range(nv):
+    if True:
         seed = 1000 + k * 17 + v * 101
         done = False
         for gen in order * 3:
