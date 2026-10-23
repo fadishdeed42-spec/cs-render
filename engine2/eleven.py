@@ -15,7 +15,10 @@ def req(path, body=None):
             msg = e.read()[:300]
             if e.code in (429, 500, 502, 503) and i < 3: time.sleep(10 * (i + 1)); continue
             raise RuntimeError(f"{e.code} {msg}")
-VOICES = {v["name"].split(" ")[0].lower(): v["voice_id"] for v in req("/voices")["voices"]}
+KNOWN = {"brian": "nPczCjzI2devNBz1zQrb", "callum": "N2lVS1w4EtoT3dr4eOWO"}
+try: VOICES = {v["name"].split(" ")[0].lower(): v["voice_id"] for v in req("/voices")["voices"]}
+except Exception: VOICES = {}
+VOICES = {**KNOWN, **VOICES}
 json.dump(VOICES, open(os.path.join(out, "voices.json"), "w"), indent=0)
 def vid(x): return VOICES.get(x.lower(), x)
 def tts(voice, text, settings, prev=None, nxt=None, model="eleven_multilingual_v2"):
