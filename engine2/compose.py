@@ -116,8 +116,8 @@ nfr = int(total * FPS)
 dec = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-i", base, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
 silent = os.path.join(WD, "silent.mp4")
 enc = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OW}x{OH}", "-r", str(FPS), "-i", "-",
-                        "-c:v", "libx264", "-crf", "17", "-preset", "medium", "-pix_fmt", "yuv420p", silent], stdin=subprocess.PIPE)
-grain = (np.random.default_rng(3).normal(0, 3.2, (OH // 2, OW // 2, 1))).astype(np.float32)
+                        "-c:v", "libx264", "-crf", "19", "-preset", "medium", "-pix_fmt", "yuv420p", silent], stdin=subprocess.PIPE)
+grain = (np.random.default_rng(3).normal(0, 1.6, (OH // 2, OW // 2, 1))).astype(np.float32)
 last = None
 for i in range(nfr):
     t = i / FPS
