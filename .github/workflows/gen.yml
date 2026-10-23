@@ -1,0 +1,58 @@
+name: gen
+# Generic sealed job runner. Push jobs/gen/NAME.enc (encrypted tar containing run.sh + inputs) and optionally
+# jobs/gen/NAME.n (number of parallel parts, default 1). Each part runs `bash run.sh` with PART/NPARTS set;
+# everything under w/out plus run.log is sealed to out/gen/NAME.pK.tar.enc. Logs print nothing readable.
+on:
+  push:
+    paths: ['jobs/gen/*.enc', 'jobs/gen/*.n']
+permissions: {contents: write}
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs: {items: '${{ steps.m.outputs.items }}'}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - id: m
+        run: |
+          F=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD -- 'jobs/gen/*.enc' 'jobs/gen/*.n' | sed 's/\.n$/.enc/' | sort -u)
+          python3 - "$F" >> $GITHUB_OUTPUT <<'PY'
+          import json, sys, os
+          items = []
+          for f in sys.argv[1].split():
+              if not os.path.exists(f): continue
+              nf = f[:-4] + ".n"
+              n = int(open(nf).read().strip()) if os.path.exists(nf) else 1
+              items += [{"file": f, "part": k, "n": n} for k in range(n)]
+          print("items=" + json.dumps(items))
+          PY
+  run:
+    needs: plan
+    if: needs.plan.outputs.items != '[]'
+    strategy: {fail-fast: false, max-parallel: 20, matrix: {include: '${{ fromJson(needs.plan.outputs.items) }}'}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: run (silent)
+        env:
+          CS_KEY: '${{ secrets.CS_KEY }}'
+          ELEVENLABS_API_KEY: '${{ secrets.ELEVENLABS_API_KEY }}'
+          HF_TOKEN: '${{ secrets.HF_TOKEN }}'
+          PART: '${{ matrix.part }}'
+          NPARTS: '${{ matrix.n }}'
+        run: |
+          N=$(basename ${{ matrix.file }} .enc)
+          tools/open_input.sh ${{ matrix.file }} w
+          cp -r engine2 w/engine2
+          mkdir -p w/out
+          (cd w && timeout 280m bash run.sh > run.log 2>&1) && echo ok || echo "step failed (details sealed)"
+          mkdir -p out/gen
+          (cd w && ../tools/seal.sh ../out/gen/$N.p$PART.tar.enc out run.log)
+      - name: commit sealed output
+        run: |
+          git config user.name cs-bot; git config user.email noreply@anthropic.com
+          git add out/gen/*.tar.enc
+          git commit -qm "gen output (sealed) [skip ci]" && for i in 1 2 3 4 5 6 7 8; do git pull -q --rebase && git push -q && break; sleep $((RANDOM % 9 + 4)); done || true
