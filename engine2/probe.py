@@ -17,7 +17,7 @@ t("pollinations", poll)
 
 def space(name, api, kw, tok):
     from gradio_client import Client
-    c = Client(name, hf_token=tok) if tok else Client(name)
+    c = Client(name, token=tok) if tok else Client(name)
     r = c.predict(api_name=api, **kw)
     return r
 def flux(tok):
@@ -33,8 +33,8 @@ if os.environ.get("HF_TOKEN"): t("flux_tok", flux(os.environ["HF_TOKEN"]))
 def wan():
     from gradio_client import Client, handle_file
     tok = os.environ.get("HF_TOKEN") or None
-    c = Client("zerogpu-aoti/wan2-2-fp8da-aoti-faster", hf_token=tok)
-    img = "out/pollinations.jpg" if os.path.exists("out/pollinations.jpg") else None
+    c = Client("zerogpu-aoti/wan2-2-fp8da-aoti-faster", token=tok)
+    img = "out/flux_anon.webp"
     info = c.view_api(return_format="dict")
     r = c.predict(input_image=handle_file(img), prompt="the hacker types fast, screen flickers, slow camera push in", duration_seconds=3.5, steps=6, api_name="/generate_video")
     v = r[0] if isinstance(r, (list, tuple)) else r
